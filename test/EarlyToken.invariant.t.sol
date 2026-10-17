@@ -23,7 +23,7 @@ contract TokenHandler is Test {
         address from = actors[fromSeed % 4];
         address to = actors[toSeed % 4];
         uint256 balance = expectedBalance[from];
-        amount = invalid ? balance + 1 : bound(amount, 0, balance);
+        amount = invalid ? bound(amount, balance + 1, type(uint256).max) : bound(amount, 0, balance);
 
         vm.prank(from);
         (bool success, bytes memory result) = address(token).call(abi.encodeCall(token.transfer, (to, amount)));
@@ -43,7 +43,8 @@ contract TokenHandler is Test {
     function approve(uint8 ownerSeed, uint8 spenderSeed, uint256 amount, bool unlimited) external {
         address owner = actors[ownerSeed % 4];
         address spender = actors[spenderSeed % 4];
-        amount = unlimited ? type(uint256).max : bound(amount, 0, token.INITIAL_SUPPLY());
+        // Approval is not capped by the holder's balance or by the token supply.
+        amount = unlimited ? type(uint256).max : bound(amount, 0, type(uint256).max - 1);
         vm.prank(owner);
         assertTrue(token.approve(spender, amount));
         expectedAllowance[owner][spender] = amount;
@@ -56,7 +57,7 @@ contract TokenHandler is Test {
         uint256 balance = expectedBalance[owner];
         uint256 allowance_ = expectedAllowance[owner][spender];
         uint256 available = balance < allowance_ ? balance : allowance_;
-        amount = invalid ? available + 1 : bound(amount, 0, available);
+        amount = invalid ? bound(amount, available + 1, type(uint256).max) : bound(amount, 0, available);
 
         vm.prank(spender);
         (bool success, bytes memory result) =
@@ -77,8 +78,54 @@ contract TokenHandler is Test {
             }
         }
     }
+
+    function revoke(uint8 ownerSeed, uint8 spenderSeed) external {
+        address owner = actors[ownerSeed % 4];
+        address spender = actors[spenderSeed % 4];
+        vm.prank(owner);
+        assertTrue(token.approve(spender, 0));
+        expectedAllowance[owner][spender] = 0;
+    }
+
+    function rejectZeroSpender(uint8 ownerSeed, uint256 amount) external {
+        _expectFailure(
+            actors[ownerSeed % 4],
+            abi.encodeCall(token.approve, (address(0), amount)),
+            abi.encodeWithSelector(IERC20Errors.ERC20InvalidSpender.selector, address(0))
+        );
+    }
+
+    function rejectZeroRecipient(uint8 ownerSeed, uint8 spenderSeed, uint256 amount, bool delegated) external {
+        address owner = actors[ownerSeed % 4];
+        address spender = actors[spenderSeed % 4];
+        uint256 available = expectedBalance[owner];
+        if (delegated && expectedAllowance[owner][spender] < available) {
+            available = expectedAllowance[owner][spender];
+        }
+        // Satisfy balance/allowance checks so the invalid recipient is actually reached.
+        amount = bound(amount, 0, available);
+        bytes memory data = delegated
+            ? abi.encodeCall(token.transferFrom, (owner, address(0), amount))
+            : abi.encodeCall(token.transfer, (address(0), amount));
+        _expectFailure(
+            delegated ? spender : owner,
+            data,
+            abi.encodeWithSelector(IERC20Errors.ERC20InvalidReceiver.selector, address(0))
+        );
+    }
+
+    /// @dev No ghost updates on failure: the next invariant checks every balance and allowance for rollback.
+    function _expectFailure(address caller, bytes memory data, bytes memory expectedError) internal {
+        vm.prank(caller);
+        (bool success, bytes memory result) = address(token).call(data);
+        assertFalse(success, "invalid operation succeeded");
+        assertEq(result, expectedError, "unexpected revert reason");
+    }
 }
 
+/// forge-config: default.invariant.runs = 256
+/// forge-config: default.invariant.depth = 128
+/// forge-config: default.invariant.fail-on-revert = true
 contract EarlyTokenInvariantTest is StdInvariant, Test {
     uint256 internal constant SUPPLY = 1_000_000_000_000_000_000_000_000_000;
     EarlyToken internal token;
@@ -91,10 +138,13 @@ contract EarlyTokenInvariantTest is StdInvariant, Test {
         token.transfer(actors[0], SUPPLY);
         handler = new TokenHandler(token, actors);
 
-        bytes4[] memory selectors = new bytes4[](3);
+        bytes4[] memory selectors = new bytes4[](6);
         selectors[0] = TokenHandler.transfer.selector;
         selectors[1] = TokenHandler.approve.selector;
         selectors[2] = TokenHandler.transferFrom.selector;
+        selectors[3] = TokenHandler.revoke.selector;
+        selectors[4] = TokenHandler.rejectZeroSpender.selector;
+        selectors[5] = TokenHandler.rejectZeroRecipient.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
         targetContract(address(handler));
     }
@@ -115,6 +165,8 @@ contract EarlyTokenInvariantTest is StdInvariant, Test {
     function invariant_balancesAndAllowancesMatchIndependentLedger() public view {
         for (uint256 i; i < actors.length; ++i) {
             assertEq(token.balanceOf(actors[i]), handler.expectedBalance(actors[i]));
+            assertEq(token.allowance(actors[i], address(0)), 0);
+            assertEq(token.allowance(address(0), actors[i]), 0);
             for (uint256 j; j < actors.length; ++j) {
                 assertEq(token.allowance(actors[i], actors[j]), handler.expectedAllowance(actors[i], actors[j]));
             }

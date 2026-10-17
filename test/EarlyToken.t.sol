@@ -312,7 +312,7 @@ contract EarlyTokenTest is Test {
     }
 
     function testFuzz_transferConservesSupply(address recipient, uint256 amount) public {
-        vm.assume(recipient != address(0) && recipient != address(this));
+        if (recipient == address(0) || recipient == address(this)) recipient = alice;
         amount = bound(amount, 0, SUPPLY);
         assertTrue(token.transfer(recipient, amount));
         assertEq(token.balanceOf(recipient), amount);
