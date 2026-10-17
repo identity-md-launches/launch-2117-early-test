@@ -1,0 +1,24 @@
+{
+  "kind": "custom_token",
+  "token": {
+    "contract": "EarlyToken",
+    "name": "EARLY TEST",
+    "symbol": "EARLY",
+    "decimals": 18,
+    "constructorArgs": [],
+    "totalSupply": "1000000000000000000000000000"
+  },
+  "contracts": [],
+  "pool": {
+    "pairedCurrency": "0xd34a99bc0f67ae1bbd63c660e6d0b0dd03e263b7",
+    "fee": 12500,
+    "tickSpacing": 60,
+    "initialPrice": "79228162514264337593543950336"
+  },
+  "economics": {
+    "poolBps": 8800,
+    "initialMarketCapWei": "2500000000000000000000",
+    "remainderTo": "0x83027ad9d0d5374335086c539dadd1db983441b0"
+  },
+  "notes": "EarlyToken is a fixed-supply ERC-20 named EARLY TEST (EARLY), with 18 decimals. Its constructor takes no arguments and mints all 1,000,000,000 tokens once to msg.sender, the factory at launch. Transfers deliver the full amount. The token has no administrative roles or external mint or burn functions. TELEGRAM_URL exposes https://t.me/EARLYCATODAY as community metadata. No application contracts are deployed. pool.initialPrice records provenance; the opening price is derived from economics.initialMarketCapWei and totalSupply."
+}
